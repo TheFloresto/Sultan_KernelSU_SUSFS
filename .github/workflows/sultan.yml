@@ -39,7 +39,7 @@ jobs:
       - name: Installing dependencies
         run: |
           sudo apt update
-          sudo apt install -y gcc-aarch64-linux-gnu
+          sudo apt install -y gcc-aarch64-linux-gnu clang lld llvm
 
       - name: Set CONFIG Environment Variable
         run: |
@@ -62,12 +62,12 @@ jobs:
           echo "Using branch for SUSFS: $SUSFS_BRANCH"
 
           # Clone repositories using the branch names
-          git clone https://github.com/TheWildJames/AnyKernel3.git -b "$ANYKERNEL_BRANCH"
+          git clone https://github.com/TheFloresto/AnyKernel3.git -b "$ANYKERNEL_BRANCH"
           git clone https://gitlab.com/simonpunk/susfs4ksu.git -b "$SUSFS_BRANCH"
           #cd susfs4ksu
           #git checkout b5c3ada461a61c6ad033693b7a00494ead3a28fd
           #cd ..
-          git clone https://github.com/TheWildJames/kernel_patches.git
+          git clone https://github.com/TheFloresto/kernel_patches.git
           git clone https://github.com/kerneltoast/${{ inputs.repo }}
       
       - name: Add KernelSU
@@ -86,9 +86,9 @@ jobs:
           echo "Applying SUSFS patches..."
           
           # Copy SUSFS patches
-          cp ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch ./
-          cp ../susfs4ksu/kernel_patches/fs/* ./fs/
-          cp ../susfs4ksu/kernel_patches/include/linux/* ./include/linux/
+          cp -v ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch ./
+          cp -v ../susfs4ksu/kernel_patches/fs/* ./fs/
+          cp -v ../susfs4ksu/kernel_patches/include/linux/* ./include/linux/
 
           cd ./KernelSU-Next
           
@@ -129,7 +129,7 @@ jobs:
           echo "Changing to configuration directory: $CONFIG..."
           cd "$CONFIG"
           # Apply additional patch
-          cp ../kernel_patches/next/syscall_hooks.patch ./
+          cp -v ../kernel_patches/next/syscall_hooks.patch ./
           patch -p1 -F 3 < syscall_hooks.patch
           
       - name: Apply Hide Stuff Patches
@@ -137,7 +137,7 @@ jobs:
           echo "Changing to configuration directory: $CONFIG..."
           cd "$CONFIG"
           # Apply additional patch
-          cp ../kernel_patches/69_hide_stuff.patch ./
+          cp -v ../kernel_patches/69_hide_stuff.patch ./
           patch -p1 -F 3 < 69_hide_stuff.patch
 
       - name: Add SUSFS Configuration Settings
@@ -185,26 +185,55 @@ jobs:
           echo "CONFIG_TCP_CONG_BIC=n" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
           echo "CONFIG_TCP_CONG_WESTWOOD=n" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
           echo "CONFIG_TCP_CONG_HTCP=n" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-
-      - name: Run sed and perl Commands
+          
+          # Performance and optimization configs
+          echo "CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
+          
+      - name: Change Kernel Name and Add Optimizations
         run: |
           echo "Changing to configuration directory: $CONFIG..."
           cd "$CONFIG"
           
-          echo "Running sed commands..."
-          sed -i 's/CONFIG_LOCALVERSION="-Sultan"/CONFIG_LOCALVERSION="-Wild"/' ./arch/arm64/configs/${{ inputs.codename }}_defconfig
+          # Get current date in the required format
+          CURRENT_DATE=$(date -u +"%a %b %d %H:%M:%S UTC %Y")
+          
+          echo "Running sed and perl commands..."
+          sed -i 's/CONFIG_LOCALVERSION="-Sultan"/CONFIG_LOCALVERSION="-@NoFloresto+@mr_vokintos"/' ./arch/arm64/configs/${{ inputs.codename }}_defconfig
+          
+          # Remove -dirty suffix and set custom version
+          perl -pi -e 's/-dirty//' ./scripts/setlocalversion
+          sed -i '$s|echo "\$res"|echo "\$res-@NoFloresto+@mr_vokintos"|' ./scripts/setlocalversion
+          
+          # Set custom build timestamp
+          perl -pi -e "s{UTS_VERSION=\"\\\$\(echo \\\$UTS_VERSION \\\$CONFIG_FLAGS \\\$TIMESTAMP \| cut -b -\\\$UTS_LEN\)\"}{UTS_VERSION=\"#1 SMP PREEMPT $CURRENT_DATE\"}" ./scripts/mkcompile_h
+          
+          # Add optimization configs
+          echo "CONFIG_LTO_CLANG_FULL=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
+          echo "CONFIG_LTO_CLANG_THIN=n" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
 
       - name: Build the Kernel
         run: |
           echo "Changing to configuration directory: $CONFIG..."
           cd "$CONFIG"
           
-          echo "Building the kernel..."
+          echo "Building the kernel with optimizations..."
+          
+          # Set optimization flags based on codename
           if [ "${{ inputs.codename }}" == "zumapro" ]; then
             export KCFLAGS="-march=armv8.6-a -O3 --param=min-pagesize=0"
+          elif [ "${{ inputs.codename }}" == "zuma" ]; then
+            export KCFLAGS="-march=armv8.4-a -O3 --param=min-pagesize=0"
+          elif [ "${{ inputs.codename }}" == "gs201" ]; then
+            export KCFLAGS="-march=armv8.4-a -O3 --param=min-pagesize=0"
+          elif [ "${{ inputs.codename }}" == "gs101" ]; then
+            export KCFLAGS="-march=armv8.2-a -O3 --param=min-pagesize=0"
+          elif [ "${{ inputs.codename }}" == "sm7250" ]; then
+            export KCFLAGS="-march=armv8.2-a -O3 --param=min-pagesize=0"
           fi
+          
+          # Build with LTO and optimizations
           make ${{ inputs.codename }}_defconfig -j$(nproc --all)
-          make -j$(nproc --all)
+          make LLVM=1 LLVM_IAS=1 LTO=full -j$(nproc --all)
 
       - name: Copy Images
         run: |
@@ -213,13 +242,18 @@ jobs:
 
           echo "Copying Image.lz4 and concatenating DTB files..."
           cp ./out/arch/arm64/boot/Image.lz4 ../AnyKernel3/Image.lz4
-          if [ "${{ inputs.codename }}" == "gs201" ]; then
+          if [ "${{ inputs.codename }}" == "gs101" ]; then
+            cat ./out/google-devices/gs101/dts/*.dtb > ../AnyKernel3/dtb
+          elif [ "${{ inputs.codename }}" == "gs201" ]; then
             cat ./out/google-devices/gs201/dts/*.dtb > ../AnyKernel3/dtb
             #cp ./out/google-devices/gs201/dts/dtbo.img ../AnyKernel3/dtbo.img
           elif [ "${{ inputs.codename }}" == "zuma" ]; then
             cat ./out/google-devices/zuma/dts/*.dtb > ../AnyKernel3/dtb
           elif [ "${{ inputs.codename }}" == "zumapro" ]; then
             cat ./out/google-devices/zumapro/dts/*.dtb > ../AnyKernel3/dtb
+          elif [ "${{ inputs.codename }}" == "sm7250" ]; then
+            # For Pixel 5/5a (Snapdragon 765G) - different path structure
+            cat ./out/arch/arm64/boot/dts/*.dtb > ../AnyKernel3/dtb
           fi
 
       - name: Create ZIP Files for Different Formats
