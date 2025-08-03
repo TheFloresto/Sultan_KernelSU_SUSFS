@@ -20,8 +20,10 @@ jobs:
     with:
       codename: "gs101"
       repo: "android_kernel_google_gs101"
-      android_version: "android14"
-      kernel_version: "6.1"
+      android_version: "android13"
+      kernel_version: "5.10"
+      sub_level: "209"
+      os_patch_level: "2024-05"
 
   build-kernel-gs201:
     uses: ./.github/workflows/sultan.yml
@@ -30,7 +32,9 @@ jobs:
       codename: "gs201"
       repo: "android_kernel_google_gs201"
       android_version: "android14"
-      kernel_version: "6.1"
+      kernel_version: "5.10"
+      sub_level: "209"
+      os_patch_level: "2024-05"
       
   build-kernel-zuma:
     uses: ./.github/workflows/sultan.yml
@@ -39,7 +43,9 @@ jobs:
       codename: "zuma"
       repo: "android_kernel_google_zuma"
       android_version: "android14"
-      kernel_version: "6.1"
+      kernel_version: "5.15"
+      sub_level: "41"
+      os_patch_level: "2024-05"
 
   build-kernel-zumapro:
     uses: ./.github/workflows/sultan.yml
@@ -47,8 +53,10 @@ jobs:
     with:
       codename: "zumapro"
       repo: "android_kernel_google_zumapro"
-      android_version: "android14"
-      kernel_version: "6.1"
+      android_version: "android15"
+      kernel_version: "5.15"
+      sub_level: "41"
+      os_patch_level: "2024-05"
 
   build-kernel-sm7250:
     uses: ./.github/workflows/sultan.yml
@@ -56,8 +64,10 @@ jobs:
     with:
       codename: "sm7250"
       repo: "android_kernel_google_sm7250"
-      android_version: "android14"
-      kernel_version: "6.1"
+      android_version: "android12"
+      kernel_version: "4.19"
+      sub_level: "248"
+      os_patch_level: "2023-01"
 
   trigger-release:
     runs-on: ubuntu-latest
@@ -156,4 +166,3 @@ jobs:
         run: |
           echo "GitHub release created with the following files:"
           ls ./downloaded-artifacts/**/*
-          
