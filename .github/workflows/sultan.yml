@@ -160,11 +160,50 @@ jobs:
         run: |
           echo "Cloning AnyKernel3 and other dependencies..."
           ANYKERNEL_BRANCH="sultan-${{ inputs.codename }}"
-          SUSFS_BRANCH="gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}"
+          
+          # Правильная логика определения ветки SUSFS
+          # Android 15 официально использует ядро 6.6, но для Sultan kernels с 5.15 используем Android 14 ветку
+          if [ "${{ inputs.android_version }}" == "android15" ] && [ "${{ inputs.kernel_version }}" == "5.15" ]; then
+            SUSFS_BRANCH="gki-android14-5.15"
+            echo "Using fallback SUSFS branch for Android 15 + kernel 5.15: $SUSFS_BRANCH"
+          elif [ "${{ inputs.android_version }}" == "android15" ] && [ "${{ inputs.kernel_version }}" == "6.6" ]; then
+            SUSFS_BRANCH="gki-android15-6.6"
+            echo "Using Android 15 SUSFS branch for kernel 6.6: $SUSFS_BRANCH"
+          else
+            SUSFS_BRANCH="gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}"
+            echo "Using standard SUSFS branch: $SUSFS_BRANCH"
+          fi
+          
           echo "Using branch for AnyKernel3: $ANYKERNEL_BRANCH"
           echo "Using branch for SUSFS: $SUSFS_BRANCH"
-          git clone https://gitlab.com/simonpunk/susfs4ksu.git -b "$SUSFS_BRANCH"
-          git clone https://github.com/TheFloresro/kernel_patches.git -b main
+          
+          # Проверяем существование ветки SUSFS перед клонированием
+          if git ls-remote --exit-code --heads https://gitlab.com/simonpunk/susfs4ksu.git "$SUSFS_BRANCH" >/dev/null 2>&1; then
+            echo "SUSFS branch $SUSFS_BRANCH exists, cloning..."
+            git clone https://gitlab.com/simonpunk/susfs4ksu.git -b "$SUSFS_BRANCH"
+          else
+            echo "SUSFS branch $SUSFS_BRANCH not found, trying fallback options..."
+            
+            # Попробуем несколько fallback вариантов
+            FALLBACK_BRANCHES=("gki-android14-5.15" "gki-android14-5.10" "gki-android13-5.15" "gki-android13-5.10")
+            
+            CLONED=false
+            for fallback in "${FALLBACK_BRANCHES[@]}"; do
+              if git ls-remote --exit-code --heads https://gitlab.com/simonpunk/susfs4ksu.git "$fallback" >/dev/null 2>&1; then
+                echo "Using fallback SUSFS branch: $fallback"
+                git clone https://gitlab.com/simonpunk/susfs4ksu.git -b "$fallback"
+                CLONED=true
+                break
+              fi
+            done
+            
+            if [ "$CLONED" = false ]; then
+              echo "No suitable SUSFS branch found, cloning main branch..."
+              git clone https://gitlab.com/simonpunk/susfs4ksu.git
+            fi
+          fi
+          
+          git clone https://github.com/TheFloresto/kernel_patches.git -b main
           git clone https://github.com/TheFloresto/AnyKernel3.git -b "$ANYKERNEL_BRANCH"
 
       - name: Initialize and Sync Kernel Source
@@ -221,6 +260,16 @@ jobs:
             KERNEL_DIR="private/gs-google"
           fi
           
+          # Определяем правильный SUSFS патч файл
+          # Для Android 15 + kernel 5.15 используем Android 14 патчи
+          if [ "${{ inputs.android_version }}" == "android15" ] && [ "${{ inputs.kernel_version }}" == "5.15" ]; then
+            SUSFS_PATCH_NAME="50_add_susfs_in_gki-android14-5.15.patch"
+            echo "Using fallback SUSFS patch: $SUSFS_PATCH_NAME"
+          else
+            SUSFS_PATCH_NAME="50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch"
+            echo "Using standard SUSFS patch: $SUSFS_PATCH_NAME"
+          fi
+          
           # Copy SUSFS files
           cp ../susfs4ksu/kernel_patches/fs/* ./$KERNEL_DIR/fs/
           cp ../susfs4ksu/kernel_patches/include/linux/* ./$KERNEL_DIR/include/linux/
@@ -253,10 +302,16 @@ jobs:
           cp ../../../kernel_patches/next/susfs_fix_patches/v1.5.9/fix_kernel_compat.c.patch ./
           patch -p1 --forward < fix_kernel_compat.c.patch
           
-          # Apply SUSFS patch to kernel
+          # Apply SUSFS patch to kernel с проверкой существования
           cd ..
-          cp ../../susfs4ksu/kernel_patches/50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch ./
-          patch -p1 < 50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch || true
+          if [ -f "../../susfs4ksu/kernel_patches/$SUSFS_PATCH_NAME" ]; then
+            echo "Applying SUSFS patch: $SUSFS_PATCH_NAME"
+            cp "../../susfs4ksu/kernel_patches/$SUSFS_PATCH_NAME" ./
+            patch -p1 < "$SUSFS_PATCH_NAME" || true
+          else
+            echo "Warning: SUSFS patch $SUSFS_PATCH_NAME not found, skipping..."
+          fi
+          
           cp ../../kernel_patches/sultan/sys.c_fix.patch ./
           patch -p1 --fuzz=3 < sys.c_fix.patch
 
