@@ -56,7 +56,7 @@ jobs:
         - build-kernel-gs201
         - build-kernel-zuma
         - build-kernel-zumapro
-        - build-kernel-floral
+        - build-kernel-sm7250
     if: ${{ inputs.make_release }}
     env:
       REPO_OWNER: TheFloresto
@@ -139,7 +139,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NEW_TAG: ${{ env.NEW_TAG }}
-
 
       # Display Files Uploaded
       - name: Display Files Uploaded
